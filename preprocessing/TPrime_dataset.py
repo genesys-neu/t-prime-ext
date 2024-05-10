@@ -611,6 +611,7 @@ class TPrimeDataset_Transformer_overlap(TPrimeDataset_Transformer):
         ds_info_path = os.path.join(ds_path, filename)
         ds_info = {
             'class_map': class_map, 'examples_map': examples_map,
+            # 'overlapping_samples': True,
             'ds_indexes':
                 {
                     'train': {'data': data_ixs, 'labels': labels_ixs},

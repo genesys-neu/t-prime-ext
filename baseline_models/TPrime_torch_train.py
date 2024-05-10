@@ -120,7 +120,7 @@ def train_func(config: Dict):
         model = Baseline_CNN1D(classes=Nclass, numChannels=num_channels, slice_len=slice_len, normalize=config['normalize'])
         loss_fn = nn.NLLLoss()
     elif config['pytorch_model'] == 'AMCNet':
-        model = AMC_Net(num_classes=Nclass)
+        model = AMC_Net(num_classes=Nclass, sig_len=slice_len, extend_channel=36, latent_dim=512, num_heads=2, conv_chan_list=None)
         loss_fn = nn.CrossEntropyLoss()
     elif config['pytorch_model'] == 'ResNet':
         model = ResNet(num_classes=Nclass, num_samples=slice_len, iq_dim=2, kernel_size=3, pool_size=2)
@@ -129,7 +129,7 @@ def train_func(config: Dict):
         model = LSTM_ap(input_shape=[slice_len, 2], hidden_size=128, output_size=Nclass, num_layers=2)
         loss_fn = nn.CrossEntropyLoss()
     elif config['pytorch_model'] == 'MCformer':
-        model = MCformer()
+        model = MCformer(classes=Nclass, hidden_size=32, kernel_size=65, num_heads=4)
         loss_fn = nn.CrossEntropyLoss()
 
     print("Model:", config['pytorch_model'], "Num. Parameters:", count_parameters(model) )
@@ -150,6 +150,9 @@ def train_func(config: Dict):
         wandb.watch(model, log_freq=10)
     normalize_flag = 'norm.' if config['normalize'] else ''
     for e in range(epochs):
+        print(f"Epoch {e + 1}\n-------------------------------")
+        if is_wandb:
+            wandb.log({'Epoch': e}, step=e)
         tr_loss, tr_acc = train_epoch(train_dataloader, model, loss_fn, optimizer, use_ray)
         if is_wandb:
             wandb.log({'Tr_loss': tr_loss}, step=e)
@@ -219,6 +222,9 @@ if __name__ == "__main__":
     parser.add_argument('--model', choices=supported_models, default='baseline_cnn1d', help='Model to be used for training')
     parser.add_argument('--out_mode', choices=supported_outmode, default='real', help='Specify data generator output format')
     parser.add_argument('--debug', default=False, action='store_true', help='It will force run on cpu and disable Wandb.')
+    parser.add_argument("--Epochs", type=int, default=5)
+    parser.add_argument("--Learning_rate", type=float, default=0.001)
+    parser.add_argument("--Batch_size", type=int, default=512)
 
     args, _ = parser.parse_known_args()
 
@@ -270,9 +276,9 @@ if __name__ == "__main__":
 
     train_config = {
 
-        "lr": 1e-3,
-        "batch_size": 512,
-        "epochs": 5,
+        'epochs': args.Epochs,
+        'lr': args.Learning_rate,
+        'batch_size': args.Batch_size,
         'pytorch_model': args.model,
         'Nclass': Nclass,
         'useRay': args.useRay,
@@ -314,7 +320,8 @@ if __name__ == "__main__":
         "Snr (dbs)": args.snr_db,
         "Learning rate": train_config['lr'],
         "Batch size": train_config['batch_size'],
-        "Slice length": args.slicelen
+        "Epochs": train_config['epochs'],
+        "Slice length": args.slicelen,
     }
     if is_wandb:
         wandb.init(project="RF_Baseline_CNN1D", config=exp_config)

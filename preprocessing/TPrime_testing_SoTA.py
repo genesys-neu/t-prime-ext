@@ -1,8 +1,10 @@
 import scipy.io as sio
 import time
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import torch
+import random
 from glob import glob
 import os
 proj_root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.join(os.pardir, os.pardir)))
@@ -21,14 +23,23 @@ from baseline_models.model_LSTM import LSTM_ap
 supported_outmode = ['real', 'complex', 'real_invdim', 'real_ampphase'] # has to be same as in TPrime_torch_train
 
 # CONFIG
-TRANS_PATH = '../TPrime_transformer/model_cp'
-CNN_PATH = '../baseline_models/results_slice512'
+# TRANS_PATH = '../TPrime_transformer/model_cp'
+TRANS_PATH = '../TPrime_transformer/best_t-prime'
 MODELS = ["Trans. (64 x 128) [6.8M params]", "Trans. (24 x 64) [1.6M params]", "CNN (1 x 512) [4.1M params]"]
 
-RESNET_PATH = '../baseline_models/results_ResNet_norm'
-AMCNET_PATH = '../baseline_models/results_AMCNet'
-MCFORMER_PATH = '../baseline_models/results_MCformer_largekernel'
-#LSTM_PATH = '../baseline_models/results_LSTM/'  # this is just random output
+# RESNET_PATH = '../baseline_models/results_ResNet_norm'
+# AMCNET_PATH = '../baseline_models/results_AMCNet'
+# CNN_PATH = '../baseline_models/results_slice512'
+# MCFORMER_PATH = '../baseline_models/results_MCformer_largekernel'
+# #LSTM_PATH = '../baseline_models/results_LSTM/'  # this is just random output
+
+RESNET_PATH = '../baseline_models/best_baseline_models/results_Resnet'
+AMCNET_PATH = '../baseline_models/best_baseline_models/results_AMCNet'
+CNN_PATH = '../baseline_models/best_baseline_models/results_slice512'
+MCFORMER_PATH = '../baseline_models/best_baseline_models/results_MCformer_largekernel'
+# LSTM_PATH = '../baseline_models/best_baseline_models/results_LSTM/'  # this is just random output
+
+
 MODELS += ["ResNet [13] (1 x 1024) [162K params]", "AMCNet [16] (1 x 128) [462K params]", "MCFormer [8] (1 x 128) [78K params]"]
 
 PROTOCOLS = ['802_11ax', '802_11b_upsampled', '802_11n', '802_11g']
@@ -282,8 +293,12 @@ if __name__ == "__main__":
         models_loaded = [False] * 6
         print("The models that have not been loaded will appear as empty lists in the results.")
         try:
+            # model_lg = TransformerModel(classes=len(PROTOCOLS), d_model=128*2, seq_len=256, nlayers=2, use_pos=False)
+            # model_lg.load_state_dict(torch.load(f"{TRANS_PATH}/modelrandom_range_best.pt", map_location=device)['model_state_dict'])
             model_lg = TransformerModel(classes=len(PROTOCOLS), d_model=128*2, seq_len=64, nlayers=2, use_pos=False)
-            model_lg.load_state_dict(torch.load(f"{TRANS_PATH}/modelrandom_lg.pt", map_location=device)['model_state_dict'])
+            # model_lg.load_state_dict(torch.load(f"{TRANS_PATH}/modelrandom_lg.pt", map_location=device)['model_state_dict'])
+            model_lg.load_state_dict(torch.load(f"{TRANS_PATH}/modelrandom_range_lg.pt", map_location=device)['model_state_dict'])
+            
             model_lg.eval()
             if args.use_gpu:
                 model_lg.cuda()
@@ -292,7 +307,8 @@ if __name__ == "__main__":
             print(f"LG model not found, the model name should be modelrandom_lg.pt and be placed at {TRANS_PATH}.")
         try:
             model_sm = TransformerModel(classes=len(PROTOCOLS), d_model=64*2, seq_len=24, nlayers=2, use_pos=False)
-            model_sm.load_state_dict(torch.load(f"{TRANS_PATH}/modelrandom_sm.pt", map_location=device)['model_state_dict'])
+            # model_sm.load_state_dict(torch.load(f"{TRANS_PATH}/modelrandom_sm.pt", map_location=device)['model_state_dict'])
+            model_sm.load_state_dict(torch.load(f"{TRANS_PATH}/modelrandom_range_sm.pt", map_location=device)['model_state_dict'])
             model_sm.eval()
             if args.use_gpu:
                 model_sm.cuda()
@@ -300,10 +316,12 @@ if __name__ == "__main__":
         except: 
             print(f"SM model not found, the model name should be modelrandom_sm.pt and be placed at {TRANS_PATH}.")
         # CNN Baseline
-        cnn_slicelen = 512
+        # cnn_slicelen = 512
+        cnn_slicelen = 8192
         try:
             cnn = Baseline_CNN1D(classes=len(PROTOCOLS), numChannels=2, slice_len=cnn_slicelen, normalize=args.normalize)
-            cnn.load_state_dict(torch.load(f"{CNN_PATH}/model.cnn.random{norm_flag}.range.pt", map_location=device)['model_state_dict'])
+            # cnn.load_state_dict(torch.load(f"{CNN_PATH}/model.cnn.random{norm_flag}.range.pt", map_location=device)['model_state_dict'])
+            cnn.load_state_dict(torch.load(f"{CNN_PATH}/model.baseline_cnn1d.random.range.pt", map_location=device)['model_state_dict'])
             cnn.eval()
             if args.use_gpu:
                 cnn.cuda()
@@ -323,9 +341,11 @@ if __name__ == "__main__":
             print(f"ResNet model not found, the model name should be model.ResNet.random.range.pt and be placed at {RESNET_PATH}.")
             
         # AMCNet
-        amcnet_slicelen = 128
+        # amcnet_slicelen = 128
+        amcnet_slicelen = 8192
         try:
-            amcnet = AMC_Net(num_classes=len(PROTOCOLS))
+            # amcnet = AMC_Net(num_classes=len(PROTOCOLS))
+            amcnet = AMC_Net(num_classes=len(PROTOCOLS), sig_len=amcnet_slicelen, extend_channel=36, latent_dim=512, num_heads=2, conv_chan_list=None)
             amcnet.load_state_dict(torch.load(f"{AMCNET_PATH}/model.AMCNet.random.range.pt", map_location=device)['model_state_dict'])
             amcnet.eval()
             if args.use_gpu:
@@ -335,9 +355,11 @@ if __name__ == "__main__":
             print(f"AMCNet model not found, the model name should be model.AMCNet.random.range.pt and be placed at {AMCNET_PATH}.")
 
         # MCformer
-        mcformer_slicelen = 128
+        # mcformer_slicelen = 128
+        mcformer_slicelen = 2048
         try:
-            mcformer = MCformer()
+            # mcformer = MCformer()
+            mcformer = MCformer(classes=len(PROTOCOLS), hidden_size=32, kernel_size=65, num_heads=4)
             mcformer.load_state_dict(torch.load(f"{MCFORMER_PATH}/model.MCformer.random.range.pt", map_location=device)['model_state_dict'])
             mcformer.eval()
             if args.use_gpu:
@@ -349,7 +371,10 @@ if __name__ == "__main__":
         y_trans_lg, y_trans_sm, y_cnn = [], [], []
         y_resnet, y_amcnet, y_mcformer = [], [], []
         for channel in CHANNELS:
+            print('\n\n\n')
+            print(f'Channel {channel}')
             if models_loaded[0]:
+                # y_trans_lg.append(validate(model_lg, class_map, seq_len=256, sli_len=128, channel=channel))
                 y_trans_lg.append(validate(model_lg, class_map, seq_len=64, sli_len=128, channel=channel))
                 print(f'Accuracy values for channel {channel} and large architecture are: ', y_trans_lg[-1])
             if models_loaded[1]:
@@ -368,9 +393,30 @@ if __name__ == "__main__":
                 y_mcformer.append(validate(mcformer, class_map, seq_len=1, sli_len=mcformer_slicelen, channel=channel, cnn=True))
                 print(f'Accuracy values for channel {channel} and MCformer architecture are: ', y_mcformer[-1])
 
+        # sm = pd.DataFrame(y_trans_sm, index=['None', 'TGn'], columns=SNR).transpose()
+        # print(sm)
+
+        lg = pd.DataFrame(y_trans_lg, index=CHANNELS, columns=SNR).transpose()
+        sm = pd.DataFrame(y_trans_sm, index=CHANNELS, columns=SNR).transpose()
+        cnn = pd.DataFrame(y_cnn, index=CHANNELS, columns=SNR).transpose()
+        resnet = pd.DataFrame(y_resnet, index=CHANNELS, columns=SNR).transpose()
+        amcnet = pd.DataFrame(y_amcnet, index=CHANNELS, columns=SNR).transpose()
+        mcformer = pd.DataFrame(y_mcformer, index=CHANNELS, columns=SNR).transpose()
+
+        save_path = f'./test_results/'
+
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
         
-        with open(f'test_results_uniformdist_onemodel{norm_flag}.txt', 'w') as f:
-            f.write(str(y_trans_lg) + '%' + str(y_trans_sm) + '%' + str(y_cnn) + '%' + str(y_resnet) + '%' + str(y_amcnet) + '%' + str(y_mcformer))
+        lg.to_pickle(f'{save_path}test_results_uniformdist_onemodel_lg{norm_flag}.pkl')
+        sm.to_pickle(f'{save_path}test_results_uniformdist_onemodel_sm{norm_flag}.pkl')
+        cnn.to_pickle(f'{save_path}test_results_uniformdist_onemodel_cnn{norm_flag}.pkl')
+        resnet.to_pickle(f'{save_path}test_results_uniformdist_onemodel_resnet{norm_flag}.pkl')
+        amcnet.to_pickle(f'{save_path}test_results_uniformdist_onemodel_amcnet{norm_flag}.pkl')
+        mcformer.to_pickle(f'{save_path}test_results_uniformdist_onemodel_mcformer{norm_flag}.pkl')
+
+        # with open(f'test_results_uniformdist_onemodel{norm_flag}.txt', 'w') as f:
+        #     f.write(str(y_trans_lg) + '%' + str(y_trans_sm) + '%' + str(y_cnn) + '%' + str(y_resnet) + '%' + str(y_amcnet) + '%' + str(y_mcformer))
     
     else: # Experiment 4: # Inference time analysis for each of the model architectures
         print('Using protocol 802.11ax and 10 dBs as a sample input.')

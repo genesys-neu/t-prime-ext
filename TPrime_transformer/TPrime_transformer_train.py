@@ -134,15 +134,17 @@ def train_func(config: Dict):
     scheduler = ReduceLROnPlateau(optimizer, 'min', min_lr=0.00001, verbose=True)
     loss_results = []
     best_loss = np.inf
-    #wandb.watch(model, log_freq=10)
+    wandb.watch(model, log_freq=10)
     best_conf_matrix = 0
     for e in range(epochs):
+        print(f"Epoch {e + 1}\n-------------------------------")
+        wandb.log({'Epoch': e}, step=e)
         tr_loss, tr_acc = train_epoch(train_dataloader, model, loss_fn, optimizer, use_ray)
-        #wandb.log({'Tr_loss': tr_loss}, step=e)
-        #wandb.log({'Tr_acc': tr_acc}, step=e)
+        wandb.log({'Tr_loss': tr_loss}, step=e)
+        wandb.log({'Tr_acc': tr_acc}, step=e)
         loss, acc, conf_matrix = validate_epoch(test_dataloader, model, loss_fn, Nclasses=Nclass, use_ray=use_ray)
-        #wandb.log({'Val_loss': loss}, step=e)
-        #wandb.log({'Val_acc': acc}, step=e)
+        wandb.log({'Val_loss': loss}, step=e)
+        wandb.log({'Val_acc': acc}, step=e)
         scheduler.step(loss)
         loss_results.append(loss)
         if use_ray:
@@ -169,7 +171,7 @@ def train_func(config: Dict):
                     'loss': loss,
                 }, os.path.join(logdir, model_name))
     
-    #wandb.log({"Num. params": total_params})
+    wandb.log({"Num. params": total_params})
     fig = plt.figure(figsize=(8,8))
     best_conf_matrix = best_conf_matrix.astype('float') / best_conf_matrix.sum(axis=1)[np.newaxis]
     plt.imshow(best_conf_matrix, interpolation='none', cmap=plt.cm.Blues)
@@ -187,6 +189,8 @@ def train_func(config: Dict):
     plt.ylabel('True label')
     plt.xlabel('Predicted label')
     plt.title(f"Confusion matrix: {args.snr_db[0]} dBs, channel: {args.wchannel}, slice: {slice_len}, seq.: {seq_len}")
+
+    # plt.savefig(os.path.join(logdir, f'confusion_matrix_{args.snr_db[0]}dBs_{args.wchannel}_{slice_len}_{seq_len}.png'))
     return loss_results, fig
 
 if __name__ == "__main__":
@@ -267,9 +271,9 @@ if __name__ == "__main__":
         "snr": args.snr_db[0]
         }
 
-    #wandb.init(project="RF_Transformer", config=exp_config)
-    #wandb.run.name = f'{args.snr_db[0]} dBs {args.wchannel} sl:{ds_info["slice_len"]} sq:{ds_info["seq_len"]} {postfix}'
+    wandb.init(project="RF_Transformer", config=exp_config)
+    wandb.run.name = f'{args.snr_db[0]} dBs {args.wchannel} sl:{ds_info["slice_len"]} sq:{ds_info["seq_len"]} {postfix}'
 
     _, conf_matrix = train_func(train_config)
-    #wandb.log({"Confusion Matrix": conf_matrix})
-    #wandb.finish()
+    wandb.log({"Confusion Matrix": conf_matrix})
+    wandb.finish()
