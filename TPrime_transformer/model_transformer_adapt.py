@@ -3,6 +3,47 @@ import torch
 from torch import nn, Tensor
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
+class TransformerModel_multiclass(nn.Module):
+    def __init__(self, d_model: int = 512, seq_len: int = 64, nhead: int = 8, nlayers: int = 2,
+                 classes: int = 4):
+        super(TransformerModel_multiclass, self).__init__()
+        self.model_type = 'Transformer'
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.norm = nn.LayerNorm(d_model)
+        # define the encoder layers
+        encoder_layers = TransformerEncoderLayer(d_model, nhead, batch_first=True)
+        self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)
+        self.d_model = d_model
+
+        # we will not use the decoder
+        # instead we will add a linear layer, another scaled dropout layer, and finally a classifier layer
+        self.pre_classifier = torch.nn.Linear(d_model*seq_len, d_model)
+        self.dropout = torch.nn.Dropout(0.5)
+        self.classifier = torch.nn.Linear(d_model, classes)
+        self.sigmoid = nn.Sigmoid()
+
+
+    def forward(self, src: Tensor) -> Tensor:
+        """
+        Args:
+            src: Tensor, shape [batch_size, seq_len, features]
+        Returns:
+            output classifier label
+        """
+        #src = src * math.sqrt(self.d_model)
+        src = self.norm(src)
+        t_out = self.transformer_encoder(src)
+        t_out = torch.flatten(t_out, start_dim=1)
+        pooler = self.pre_classifier(t_out)
+        pooler = torch.nn.ReLU()(pooler)
+        pooler = self.dropout(pooler)
+        output = self.classifier(pooler)
+        output = self.sigmoid(output)
+        return output
+
+
 class LoRALayer(nn.Module):
     def __init__(self, input_dim, output_dim, rank, alpha=1.0):
         super(LoRALayer, self).__init__()
