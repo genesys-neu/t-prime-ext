@@ -73,6 +73,7 @@ class TPrimeDataset(Dataset):
         self.seed = seed
         self.ds_path = ds_path
         self.test_ratio = test_ratio
+        self.calib_ratio = calib_ratio
         self.double_class_label = double_class_label    # this is used for overlapping case (it outputs two labels)
         self.out_mode = out_mode
 
@@ -82,7 +83,7 @@ class TPrimeDataset(Dataset):
         if ota:
             assert(apply_wchannel is None)
 
-        assert(ds_type in ['train', 'test'])
+        assert(ds_type in ['train', 'test', 'calib'])
         self.ds_type = ds_type
         if file_postfix != '' and file_postfix[-1] != '_':
             file_postfix += '__'
@@ -211,6 +212,7 @@ class TPrimeDataset(Dataset):
                 calib_threshold = int(nsamples * (1-calib_ratio))
             else:
                 test_threshold = nsamples
+                calib_threshold = nsamples
             for ix, path in examples_map[c].items():
                 if not self.ota: # simulation files
                     sig = sio.loadmat(path)
@@ -448,7 +450,7 @@ class TPrimeDataset_Transformer(TPrimeDataset):
             'slice_len': self.slice_len,
             'numsamps': {'train' : len(self.ds_info['ds_indexes']['train']['data'].keys()),
                          'test': len(self.ds_info['ds_indexes']['test']['data'].keys()),
-                         'calib': len(self.ds_info['ds_indexes']['test']['data'].keys())},
+                         'calib': len(self.ds_info['ds_indexes']['calib']['data'].keys())},
             'nclasses': len(self.protocols),
             'nchans': 2,    # real and imag components are separated on different channels
         }
@@ -543,6 +545,7 @@ class TPrimeDataset_Transformer_overlap(TPrimeDataset_Transformer):
                 calib_threshold = int(nsamples * (1-calib_ratio))
             else:
                 test_threshold = nsamples
+                calib_threshold = nsamples
             for ix, path in examples_map[c].items():
                 # read binary files and get length
                 sig = np.fromfile(path, dtype=np.complex128)
