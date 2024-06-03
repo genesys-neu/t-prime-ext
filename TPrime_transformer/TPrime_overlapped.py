@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import random
 import numpy as np
+from scipy.optimize import brentq
 from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix as conf_mat
 from torch.utils.data import Subset
 from sklearn.model_selection import train_test_split
@@ -18,6 +19,7 @@ from TPrime_transformer.model_transformer import TransformerModel, TransformerMo
 from baseline_models.model_cnn1d import Baseline_CNN1D
 from preprocessing.model_rmsnorm import RMSNorm
 from sklearn.metrics import roc_auc_score, classification_report, multilabel_confusion_matrix
+from conformal_prediction import false_negative_rate, conformal_prediction
 
 # Function to change the shape of obs
 # the input is obs with shape (channel, slice)
@@ -196,6 +198,7 @@ if __name__ == "__main__":
                         large. If not defined lg architecture will be used.")
     parser.add_argument("--test_mode", default="random_sampling", choices=["random_sampling", "future"], help="Get test from separate files (future) or \
                         a random sampling of dataset indexes (random_sampling).")
+    parser.add_argument("--calib", default=False, action='store_true', help="If present, we calibrate the model with the provided calibration dataset split.")
     parser.add_argument("--retrain", action='store_true', default=False, help="Load the selected model and fine-tune. If this is false the model \
                          will be trained from scratch and the model")
     parser.add_argument("--ota_dataset", default='', help="Flag to add in results name to identify experiment.")
@@ -207,6 +210,7 @@ if __name__ == "__main__":
     # Config
     MODEL_NAME = get_model_name(args.model_path)
     PATH = '/'.join(args.model_path.split('/')[0:-1])
+    CALIB_PATH = './calib_scores/'
     PROTOCOLS = ['802_11ax', '802_11b_upsampled', '802_11n', '802_11g']
     MIXES = ['b-ax', 'b-g', 'b-n', 'ax-n', 'ax-g', 'n-g']
     CHANNELS = ['None', 'TGn', 'TGax', 'Rayleigh']
@@ -227,9 +231,12 @@ if __name__ == "__main__":
     font = {'size': 15}
     plt.rc('font', **font)
 
+    os.makedirs(CALIB_PATH, exist_ok=True)
+
     datasets = args.datasets
     ds_names = []
     ds_train = []
+    ds_calib = []
     ds_test = []
     tr_model = None
     # Load model
@@ -248,10 +255,14 @@ if __name__ == "__main__":
             if (os.path.basename(ds) == 'DATASET3_1' or os.path.basename(ds) == 'DATASET3_2' or ds.split('/')[0] == 'DATASET3_3'):
                 ds_train.append(TPrimeDataset_Transformer_overlap(protocols=PROTOCOLS, ds_path=os.path.join(args.ds_path, ds, 'OVERLAP25'), ds_type='train', seq_len=24, slice_len=64, slice_overlap_ratio=0, test_ratio=0.2, testing_mode=args.test_mode,
                                                 raw_data_ratio=args.dataset_ratio, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))
+                ds_calib.append(TPrimeDataset_Transformer_overlap(protocols=PROTOCOLS, ds_path=os.path.join(args.ds_path, ds, 'OVERLAP25'), ds_type='calib', seq_len=24, slice_len=64, slice_overlap_ratio=0, test_ratio=0.2, testing_mode=args.test_mode,
+                                                raw_data_ratio=args.dataset_ratio, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))
                 ds_test.append(TPrimeDataset_Transformer_overlap(protocols=PROTOCOLS, ds_path=os.path.join(args.ds_path, ds, 'OVERLAP25'), ds_type='test', seq_len=24, slice_len=64, slice_overlap_ratio=0, test_ratio=0.2, testing_mode=args.test_mode,
                                                 raw_data_ratio=args.dataset_ratio, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))
                 ds_names.append(ds + ' OVERLAP25')
                 ds_train.append(TPrimeDataset_Transformer_overlap(protocols=PROTOCOLS, ds_path=os.path.join(args.ds_path, ds, 'OVERLAP50'), ds_type='train', seq_len=24, slice_len=64, slice_overlap_ratio=0, test_ratio=0.2, testing_mode=args.test_mode,
+                                                raw_data_ratio=args.dataset_ratio, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))
+                ds_calib.append(TPrimeDataset_Transformer_overlap(protocols=PROTOCOLS, ds_path=os.path.join(args.ds_path, ds, 'OVERLAP50'), ds_type='calib', seq_len=24, slice_len=64, slice_overlap_ratio=0, test_ratio=0.2, testing_mode=args.test_mode,
                                                 raw_data_ratio=args.dataset_ratio, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))
                 ds_test.append(TPrimeDataset_Transformer_overlap(protocols=PROTOCOLS, ds_path=os.path.join(args.ds_path, ds, 'OVERLAP50'), ds_type='test', seq_len=24, slice_len=64, slice_overlap_ratio=0, test_ratio=0.2, testing_mode=args.test_mode,
                                                 raw_data_ratio=args.dataset_ratio, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))
@@ -259,8 +270,11 @@ if __name__ == "__main__":
             else:
                 ds_train.append(TPrimeDataset_Transformer(protocols=PROTOCOLS, ds_path=os.path.join(args.ds_path, ds), ds_type='train', seq_len=24, slice_len=64, slice_overlap_ratio=0, test_ratio=0.2, testing_mode=args.test_mode,
                                                raw_data_ratio=args.dataset_ratio, double_class_label=True, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))
+                ds_calib.append(TPrimeDataset_Transformer(protocols=PROTOCOLS, ds_path=os.path.join(args.ds_path, ds), ds_type='calib', seq_len=24, slice_len=64, slice_overlap_ratio=0, test_ratio=0.2, testing_mode=args.test_mode,
+                                               raw_data_ratio=args.dataset_ratio, double_class_label=True, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))
+                
                 ds_test.append(TPrimeDataset_Transformer(protocols=PROTOCOLS, ds_path=os.path.join(args.ds_path, ds), ds_type='test', seq_len=24, slice_len=64, slice_overlap_ratio=0, test_ratio=0.2, testing_mode=args.test_mode,
-                                              raw_data_ratio=args.dataset_ratio, double_class_label=True, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))
+                                               raw_data_ratio=args.dataset_ratio, double_class_label=True, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))
                 ds_names.append(ds)
     else: # lg
         if args.retrain:
@@ -270,25 +284,36 @@ if __name__ == "__main__":
             if (os.path.basename(ds) == 'DATASET3_1' or os.path.basename(ds) == 'DATASET3_2' or ds.split('/')[0] == 'DATASET3_3'):
                 ds_train.append(TPrimeDataset_Transformer_overlap(protocols=PROTOCOLS, ds_path=os.path.join(args.ds_path, ds, 'OVERLAP25'), ds_type='train', seq_len=64, slice_len=128, slice_overlap_ratio=0, test_ratio=0.2, testing_mode=args.test_mode,
                                                 raw_data_ratio=args.dataset_ratio, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))
+                ds_calib.append(TPrimeDataset_Transformer_overlap(protocols=PROTOCOLS, ds_path=os.path.join(args.ds_path, ds, 'OVERLAP25'), ds_type='calib', seq_len=64, slice_len=128, slice_overlap_ratio=0, test_ratio=0.2, testing_mode=args.test_mode,
+                                                raw_data_ratio=args.dataset_ratio, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))                
                 ds_test.append(TPrimeDataset_Transformer_overlap(protocols=PROTOCOLS, ds_path=os.path.join(args.ds_path, ds, 'OVERLAP25'), ds_type='test', seq_len=64, slice_len=128, slice_overlap_ratio=0, test_ratio=0.2, testing_mode=args.test_mode,
                                                 raw_data_ratio=args.dataset_ratio, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))
                 ds_names.append(ds + ' OVERLAP25')
                 ds_train.append(TPrimeDataset_Transformer_overlap(protocols=PROTOCOLS, ds_path=os.path.join(args.ds_path, ds, 'OVERLAP50'), ds_type='train', seq_len=64, slice_len=128, slice_overlap_ratio=0, test_ratio=0.2, testing_mode=args.test_mode,
                                                 raw_data_ratio=args.dataset_ratio, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))
+                ds_calib.append(TPrimeDataset_Transformer_overlap(protocols=PROTOCOLS, ds_path=os.path.join(args.ds_path, ds, 'OVERLAP50'), ds_type='calib', seq_len=64, slice_len=128, slice_overlap_ratio=0, test_ratio=0.2, testing_mode=args.test_mode,
+                                                raw_data_ratio=args.dataset_ratio, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))                
                 ds_test.append(TPrimeDataset_Transformer_overlap(protocols=PROTOCOLS, ds_path=os.path.join(args.ds_path, ds, 'OVERLAP50'), ds_type='test', seq_len=64, slice_len=128, slice_overlap_ratio=0, test_ratio=0.2, testing_mode=args.test_mode,
                                                 raw_data_ratio=args.dataset_ratio, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))
                 ds_names.append(ds + ' OVERLAP50')
             else:
                 ds_train.append(TPrimeDataset_Transformer(protocols=PROTOCOLS, ds_path=os.path.join(args.ds_path, ds), ds_type='train', seq_len=64, slice_len=128, slice_overlap_ratio=0, test_ratio=0.2, testing_mode=args.test_mode,
                                                raw_data_ratio=args.dataset_ratio, double_class_label=True, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))
+                ds_calib.append(TPrimeDataset_Transformer(protocols=PROTOCOLS, ds_path=os.path.join(args.ds_path, ds), ds_type='calib', seq_len=64, slice_len=128, slice_overlap_ratio=0, test_ratio=0.2, testing_mode=args.test_mode,
+                                               raw_data_ratio=args.dataset_ratio, double_class_label=True, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))
                 ds_test.append(TPrimeDataset_Transformer(protocols=PROTOCOLS, ds_path=os.path.join(args.ds_path, ds), ds_type='test', seq_len=64, slice_len=128, slice_overlap_ratio=0, test_ratio=0.2, testing_mode=args.test_mode,
-                                              raw_data_ratio=args.dataset_ratio, double_class_label=True, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))
+                                               raw_data_ratio=args.dataset_ratio, double_class_label=True, override_gen_map=False, ota=True, apply_wchannel=None, apply_noise=False, transform=chan2sequence))
                 ds_names.append(ds)
     
     # concat all loaded datasets
     ds_train = torch.utils.data.ConcatDataset(ds_train)
+    ds_calib = torch.utils.data.ConcatDataset(ds_calib)
     if not args.test:
         ds_test = torch.utils.data.ConcatDataset(ds_test)
+
+    print(len(ds_train))
+    print(len(ds_calib))
+    print(len(ds_test))
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.use_gpu else "cpu")
     if args.retrain: # Load pretrained model
@@ -296,8 +321,172 @@ if __name__ == "__main__":
             tr_model.load_state_dict(torch.load(args.model_path, map_location=device)['model_state_dict'])
         except:
             raise Exception("The model you provided does not correspond with the selected architecture. Please revise and try again.")
+    if args.calib and not args.test:
+        model.load_state_dict(torch.load(args.model_path, map_location=device)['model_state_dict'])
+        calib_sgmd_scores = []
+        calib_labels = []
+        calib_val_sgmd_scores = []
+        calib_val_labels = []
+        if train_config['RMSNorm']:
+            RMSNorm_l = RMSNorm(model='Transformer')
+        else:
+            RMSNorm_l = None
+        model.to(device)
+        model.eval()
 
-    if args.test and not args.retrain:
+        # for ds_ix, ds in enumerate(ds_calib):
+
+        dataset = train_val_dataset(ds_calib)
+        # Create data loaders
+        calib_dataloader = DataLoader(dataset['train'], batch_size=train_config['batchSize'], shuffle=True)
+        calib_val_dataloader = DataLoader(dataset['val'], batch_size=train_config['batchSize'], shuffle=True)
+
+        # calib_dataloader = DataLoader(ds, batch_size=train_config['batchSize'], shuffle=True)
+        # print(f'Calibrating model with dataset {ds_names[ds_ix]}')
+
+        # print(ds)
+        size = len(calib_dataloader.dataset)
+        size_val = len(calib_val_dataloader.dataset)
+        with torch.no_grad():
+            for batch, (X, y) in tqdm(enumerate(calib_dataloader)):
+                # print(X)
+                X = X.to(device)
+                y = one_hot_encode(y)
+                y = y.to(device)
+                if not (RMSNorm_l is None):
+                    X = RMSNorm_l(X)
+                # print(f'X shape: {X.shape}')
+                pred = model(X.float())
+                # print(f'pred shape: {pred.shape}')
+                calib_sgmd_scores.extend(pred.tolist())
+                # print(f'y shape: {y.shape}')
+                calib_labels.extend(y.tolist())
+
+                if batch % 50 == 0:
+                    current = batch * len(X)
+                    print(f"[{current:>5d}/{size:>5d}]")
+
+        calib_sgmd_scores = np.array(calib_sgmd_scores)
+        calib_labels = np.array(calib_labels)
+
+        print(f'calib sgmd scores{calib_sgmd_scores.shape}')
+        print(f'calib labels {calib_labels.shape}')
+
+        with torch.no_grad():
+            for batch, (X, y) in tqdm(enumerate(calib_val_dataloader)):
+                # print(X)
+                X = X.to(device)
+                y = one_hot_encode(y)
+                y = y.to(device)
+                if not (RMSNorm_l is None):
+                    X = RMSNorm_l(X)
+                # print(f'X shape: {X.shape}')
+                pred = model(X.float())
+                # print(f'pred shape: {pred.shape}')
+                calib_val_sgmd_scores.extend(pred.tolist())
+                # print(f'y shape: {y.shape}')
+                calib_val_labels.extend(y.tolist())
+
+                if batch % 50 == 0:
+                    current = batch * len(X)
+                    print(f"[{current:>5d}/{size_val:>5d}]")
+
+        calib_val_sgmd_scores = np.array(calib_val_sgmd_scores)
+        calib_val_labels = np.array(calib_val_labels)
+
+        print(f'calib val sgmd scores{calib_val_sgmd_scores.shape}')
+        print(f'calib val labels {calib_val_labels.shape}')
+
+
+        # Save as numpy array
+        np.save(os.path.join(CALIB_PATH + MODEL_NAME + '_calib_sgmd_scores.npy'), calib_sgmd_scores)
+        np.save(os.path.join(CALIB_PATH + MODEL_NAME + '_calib_labels.npy'), calib_labels)
+
+        np.save(os.path.join(CALIB_PATH + MODEL_NAME + '_calib_val_sgmd_scores.npy'), calib_val_sgmd_scores)
+        np.save(os.path.join(CALIB_PATH + MODEL_NAME + '_calib_val_labels.npy'), calib_val_labels)
+
+    elif args.calib and args.test:
+        model.load_state_dict(torch.load(args.model_path, map_location=device)['model_state_dict'])
+        if train_config['RMSNorm']:
+            RMSNorm_l = RMSNorm(model='Transformer')
+        else:
+            RMSNorm_l = None
+        model.to(device)
+        model.eval()
+
+        calib_sgmd_scores = np.load(os.path.join(CALIB_PATH + MODEL_NAME + '_calib_sgmd_scores.npy'))
+        calib_labels = np.load(os.path.join(CALIB_PATH + MODEL_NAME + '_calib_labels.npy'))
+
+        calib_val_sgmd_scores = np.load(os.path.join(CALIB_PATH + MODEL_NAME + '_calib_val_sgmd_scores.npy'))
+        calib_val_labels = np.load(os.path.join(CALIB_PATH + MODEL_NAME + '_calib_val_labels.npy'))
+
+        print(f'calib sgmd scores{calib_sgmd_scores.shape}')
+        print(f'calib labels {calib_labels.shape}')
+
+        print(f'calib val sgmd scores{calib_val_sgmd_scores.shape}')
+        print(f'calib val labels {calib_val_labels.shape}')
+
+        # Problem setup
+        n=1000 # number of calibration points
+        alpha = 0.1 # 1-alpha is the desired false negative rate
+
+
+
+        # # 1: get conformal scores. n = calib_Y.shape[0]
+        # cal_scores = 1-calib_sgmd_scores[np.arange(n),calib_labels]
+        # # 2: get adjusted quantile
+        # q_level = np.ceil((n+1)*(1-alpha))/n
+        # qhat = np.quantile(cal_scores, q_level, interpolation='higher')
+        # prediction_sets = calib_val_sgmd_scores >= (1-qhat) # 3: form prediction sets
+
+        # # Calculate empirical coverage
+        # empirical_coverage = prediction_sets[np.arange(prediction_sets.shape[0]),calib_val_labels].mean()
+        # print(f"The empirical coverage is: {empirical_coverage}")
+        
+
+
+        # Run the conformal risk control procedure
+        def lamhat_threshold(lam): return false_negative_rate(calib_sgmd_scores>=lam, calib_labels) - ((n+1)/n*alpha - 1/(n+1))
+        lamhat = brentq(lamhat_threshold, 0, 1)
+        prediction_sets = calib_val_sgmd_scores >= lamhat
+
+        # Calculate empirical FNR
+        print(f"The empirical FNR is: {false_negative_rate(prediction_sets, calib_val_labels)} and the threshold value is: {lamhat}")
+
+        for ds_ix, ds in enumerate(ds_test):
+            # Calculate performance and save matrix
+
+            # validation loop through test data
+            # test_dataloader = DataLoader(ds, batch_size=train_config['batchSize'], shuffle=True)
+            test_dataloader = DataLoader(ds, batch_size=1, shuffle=True)
+            size = len(test_dataloader.dataset)
+
+            with torch.no_grad():
+                for X, y in test_dataloader:
+                    X = X.to(device)
+                    y = one_hot_encode(y)
+                    y = y.to(device)
+                    if not (RMSNorm_l is None):
+                        X = RMSNorm_l(X)
+                    # print(f'X shape: {X.shape}')
+                    # print(f'y shape: {y.shape}')
+                    pred = model(X.float())
+                    # pred = pred.all(dim=0).type(torch.float)
+                    # print(f'pred shape: {pred.shape}')
+                    prediction_sets = pred > 1-lamhat
+                    prediction_sets = prediction_sets.to('cpu').numpy().reshape(-1)
+                    print('\n\n')
+                    print(f'Total Classes are: {PROTOCOLS}')
+                    print(f'Model Prediction is: {pred.cpu()}')
+                    print(f'Prediction set is: {prediction_sets}')
+                    print(f'True label is: {y.to("cpu").numpy().reshape(-1)}')
+                    
+                    protocol_list = np.array(PROTOCOLS)
+                    print(f'Prediction set is: {list(protocol_list[prediction_sets])}')
+
+
+
+    elif args.test and not args.retrain and not args.calib:
         # load model
         model.load_state_dict(torch.load(args.model_path, map_location=device)['model_state_dict'])
         # Use the loaded model to do inference over the OTA dataset
